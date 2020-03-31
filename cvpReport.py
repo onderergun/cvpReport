@@ -179,14 +179,14 @@ def main():
     password = getpass()
     cvpServer=args.cvpServer
     
-    print "Attaching to API on %s to get Data" %cvpServer
+    print ("Attaching to API on %s to get Data" %cvpServer )
     try:
         cvpSession = serverCvp(str(cvpServer),username,password)
         logOn = cvpSession.logOn()
     except serverCvpError as e:
         text = "serverCvp:(main1)-%s" % e.value
-        print text
-    print "Login Complete"
+        print (text)
+    print ("Login Complete")
     inventoryList = cvpSession.getInventory()
     numDevices = len(inventoryList)
     wb = openpyxl.Workbook()
@@ -232,7 +232,7 @@ def main():
         percentram=0
         freeram=0
         totalram=0
-        uptimelist=[]
+        unavailabletime = 0
         while t<96:
             sysInfo=cvpSession.getSysinfo(inventoryList[k]["serialNumber"],str(int(currenttime)-t*900)+"000000000")
             j=0
@@ -240,7 +240,9 @@ def main():
             for item in sysInfo["notifications"]:
                 if "uptime" in sysInfo["notifications"][j]["updates"]:
                     seconds_input = sysInfo["notifications"][j]["updates"]["uptime"]["value"]["int"]
-                    uptimelist.append(seconds_input)
+                    print (seconds_input)
+                    if seconds_input < 900:
+                        unavailabletime = unavailabletime + 900 - seconds_input
                     if t==0:
                         conversion = datetime.timedelta(seconds=seconds_input)
                         converted_time = str(conversion)
@@ -256,16 +258,9 @@ def main():
                 j+=1
             t+=1
 
-        unavailabletime=0
-        n=0
-        for item in uptimelist:
-            if n>0:
-                if uptimelist[n-1]>uptimelist[n]:
-                    unavailabletime=unavailabletime+uptimelist[n-1]-uptimelist[n]
-            n+=1
-                
+        print (unavailabletime)
         
-        sheet.cell(row=k+2,column=7).value = round(100*(1-unavailabletime/86400),2)
+        sheet.cell(row=k+2,column=7).value = round(100*(1-float(unavailabletime)/float(86400)),2)
         sheet.cell(row=k+2,column=8).value = round(loadAvg15m/96,2)
         sheet.cell(row=k+2,column=9).value = round(100*percentram/96,2)
     
@@ -322,14 +317,14 @@ def main():
     filename = 'rapor_'+ d1 + '.xlsx'
     wb.save(filename)
     
-    print "Logout from CVP:%s"% cvpSession.logOut()['data']
+    print ("Logout from CVP:%s" % cvpSession.logOut()['data'])
 
-    send_from = "senderemail@domain.com"
-    send_to = ["receiveremail@domain.com"]
+    send_from = "sender@domain.com"
+    send_to = ["receiver@domain.com"]
     subject = "Daily Report "+d1
     message = ""
     files = [filename]
-    server = "smtpserver.domain.com"
+    server = "smtp.domain.com"
     username = "username"
     password = "password"
     port =587
