@@ -75,21 +75,11 @@ class serverCvp(object):
         response = requests.post(self.url+logoutURL, cookies=self.cookies, json=self.authenticateData,headers=headers,verify=False)
         return response.json()
     
-    def getConfiglets(self):
-        getURL = "/cvpservice/configlet/getConfiglets.do?"
-        getParams = {"startIndex":0, "endIndex":0}
-        response = requests.get(self.url+getURL,cookies=self.cookies,params=getParams,verify=False)
-        if "errorMessage" in str(response.json()):
-            text = "Error retrieving configlets failed: %s" % response.json()['errorMessage']
-            raise serverCvpError(text)
-        configlets = response.json()["data"]
-        return configlets
-  
     def getInventory(self):
        getURL = "/cvpservice/inventory/devices"
        response = requests.get(self.url+getURL,cookies=self.cookies,verify=False)
        if "errorMessage" in str(response.json()):
-           text = "Error, retrieving tasks failed: %s" % response.json()['errorMessage']
+           text = "Error, retrieving inventory failed: %s" % response.json()['errorMessage']
            raise serverCvpError(text)
        inventoryList = response.json()
        return inventoryList
@@ -103,15 +93,6 @@ class serverCvp(object):
         sysInfo = response.json()
         return sysInfo
         
-    def snapshotDeviceConfig(self,deviceSerial):
-        getURL = "/cvpservice/snapshot/deviceConfigs/"+deviceSerial+"?current=true"
-        response = requests.get(self.url+getURL,cookies=self.cookies,verify=False)
-        if "errorMessage" in str(response.json()):
-            text = "Error retrieving running config failed: %s" % response.json()['errorMessage']
-            raise serverCvpError(text)
-        deviceConfig = response.json()["runningConfigInfo"]
-        return deviceConfig
-        
     def getTasks(self):
         getURL = "/cvpservice/task/getTasks.do?"
         getParams = {"startIndex":0, "endIndex":0}
@@ -123,23 +104,10 @@ class serverCvp(object):
         return tasks
 
 
-def send_mail(send_from, send_to, subject, message, files=[],
-              server="localhost", port=587, username='', password='',
-              use_tls=True):
-    """Compose and send email with provided info and attachments.
+def send_mail(send_from, send_to, subject, message, files,
+              server, port, username, password,
+              use_tls):
 
-    Args:
-        send_from (str): from name
-        send_to (str): to name
-        subject (str): message title
-        message (str): message body
-        files (list[str]): list of file paths to be attached to email
-        server (str): mail server host name
-        port (int): port number
-        username (str): server auth username
-        password (str): server auth password
-        use_tls (bool): use TLS mode
-    """
     msg = MIMEMultipart()
     msg['From'] = send_from
     msg['To'] = COMMASPACE.join(send_to)
@@ -190,7 +158,7 @@ def main():
     inventoryList = cvpSession.getInventory()
     numDevices = len(inventoryList)
     wb = openpyxl.Workbook()
-    sheet = wb.get_sheet_by_name('Sheet')
+    sheet = wb['Sheet']
     sheet['A1'] = 'Hostname'
     sheet['A1'].font = Font(size=14, bold=True)
     sheet.column_dimensions['A'].width = 20
@@ -219,52 +187,43 @@ def main():
     sheet['I1'].font = Font(size=14, bold=True)
     sheet.column_dimensions['I'].width = 20
 
-    k=0
-    for device in inventoryList:
-        sheet.cell(row=k+2,column=1).value=inventoryList[k]["hostname"]
-        sheet.cell(row=k+2,column=2).value=inventoryList[k]["modelName"]
-        sheet.cell(row=k+2,column=3).value=inventoryList[k]["version"]
-        sheet.cell(row=k+2,column=4).value=inventoryList[k]["ipAddress"]
-        sheet.cell(row=k+2,column=5).value=inventoryList[k]["serialNumber"]
+    for num,device in enumerate(inventoryList):
+        sheet.cell(row=num+2,column=1).value=device["hostname"]
+        sheet.cell(row=num+2,column=2).value=device["modelName"]
+        sheet.cell(row=num+2,column=3).value=device["version"]
+        sheet.cell(row=num+2,column=4).value=device["ipAddress"]
+        sheet.cell(row=num+2,column=5).value=device["serialNumber"]
         
-        t=0
         loadAvg15m=0
         percentram=0
         freeram=0
         totalram=0
         unavailabletime = 0
+        t=0
         while t<96:
-            sysInfo=cvpSession.getSysinfo(inventoryList[k]["serialNumber"],str(int(currenttime)-t*900)+"000000000")
-            j=0
-
+            sysInfo=cvpSession.getSysinfo(device["serialNumber"],str(int(currenttime)-t*900)+"000000000")
             for item in sysInfo["notifications"]:
-                if "uptime" in sysInfo["notifications"][j]["updates"]:
-                    seconds_input = sysInfo["notifications"][j]["updates"]["uptime"]["value"]["int"]
-                    print (seconds_input)
+                if "uptime" in item["updates"]:
+                    seconds_input = item["updates"]["uptime"]["value"]["int"]
                     if seconds_input < 900:
                         unavailabletime = unavailabletime + 900 - seconds_input
                     if t==0:
                         conversion = datetime.timedelta(seconds=seconds_input)
                         converted_time = str(conversion)
-                        sheet.cell(row=k+2,column=6).value = converted_time
+                        sheet.cell(row=num+2,column=6).value = converted_time
 
-                if "loadAvg15m" in sysInfo["notifications"][j]["updates"]:
-                    loadAvg15m = loadAvg15m + Decimal(sysInfo["notifications"][j]["updates"]["loadAvg15m"]["value"]["float"])
-                if "freeram" in sysInfo["notifications"][j]["updates"]:
-                    freeram = int(sysInfo["notifications"][j]["updates"]["freeram"]["value"]["int"])
-                if "totalram" in sysInfo["notifications"][j]["updates"]:
-                    totalram = int(sysInfo["notifications"][j]["updates"]["totalram"]["value"]["int"])
+                if "loadAvg15m" in item["updates"]:
+                    loadAvg15m = loadAvg15m + Decimal(item["updates"]["loadAvg15m"]["value"]["float"])
+                if "freeram" in item["updates"]:
+                    freeram = int(item["updates"]["freeram"]["value"]["int"])
+                if "totalram" in item["updates"]:
+                    totalram = int(item["updates"]["totalram"]["value"]["int"])
                     percentram=percentram + Decimal(freeram)/Decimal(totalram)
-                j+=1
             t+=1
-
-        print (unavailabletime)
         
-        sheet.cell(row=k+2,column=7).value = round(100*(1-float(unavailabletime)/float(86400)),2)
-        sheet.cell(row=k+2,column=8).value = round(loadAvg15m/96,2)
-        sheet.cell(row=k+2,column=9).value = round(100*percentram/96,2)
-    
-        k=k+1
+        sheet.cell(row=num+2,column=7).value = round(100*(1-float(unavailabletime)/float(86400)),2)
+        sheet.cell(row=num+2,column=8).value = round(loadAvg15m/96,2)
+        sheet.cell(row=num+2,column=9).value = round(100*percentram/96,2)
         
 #    Get the completed tasks and who executed it for the last 7 days"
     last7days = []
@@ -291,29 +250,25 @@ def main():
     sheet['H'+str(numDevices+5)].font = Font(size=14, bold=True)
     
     taskList = cvpSession.getTasks()
-    k=0
     userTask = {}
     for task in taskList:
-        if taskList[k]["workOrderState"] == "COMPLETED":
-            taskCreator = taskList[k]["createdBy"]
+        if task["workOrderState"] == "COMPLETED":
+            taskCreator = task["createdBy"]
             if not taskCreator in userTask:
                 userTask[taskCreator] = {}
-            taskCompletiontime = datetime.datetime.fromtimestamp(taskList[k]["completedOnInLongFormat"]/1000).strftime('%d-%m-%Y')
+            taskCompletiontime = datetime.datetime.fromtimestamp(task["completedOnInLongFormat"]/1000).strftime('%d-%m-%Y')
             if not taskCompletiontime in userTask[taskCreator]:
                 userTask[taskCreator][taskCompletiontime] = 0
             userTask[taskCreator][taskCompletiontime] = userTask[taskCreator][taskCompletiontime]+1
-        k=k+1
-    k=0
-    for user in userTask:
-        sheet.cell(row=numDevices+6+k,column=1).value = user
-        j=2
-        for day in last7days:
+
+    for num,user in enumerate(userTask):
+        sheet.cell(row=numDevices+6+num,column=1).value = user
+        for iter,day in enumerate(last7days):
             if day in userTask[user]:
-                sheet.cell(row=numDevices+6+k,column=j).value = userTask[user][day]
+                sheet.cell(row=numDevices+6+num,column=iter+2).value = userTask[user][day]
             else:
-                sheet.cell(row=numDevices+6+k,column=j).value = 0
-            j+=1
-        k+=1
+                sheet.cell(row=numDevices+6+num,column=iter+2).value = 0
+
     filename = 'rapor_'+ d1 + '.xlsx'
     wb.save(filename)
     
